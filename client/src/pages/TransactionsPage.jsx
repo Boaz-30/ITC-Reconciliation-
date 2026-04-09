@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { api } from "../utils/api.js";
-import { Btn, Badge, TelcoBadge, Modal, MetricCard, Spinner } from "../components/UI.jsx";
+import { Btn, Badge, TelcoBadge, MetricCard, Spinner } from "../components/UI.jsx";
 import Charts from "../components/Charts.jsx";
 
 export default function TransactionsPage({ view, toast, onStatsChange }) {
@@ -13,19 +13,7 @@ export default function TransactionsPage({ view, toast, onStatsChange }) {
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterTelco, setFilterTelco] = useState("all");
   const [filterDate, setFilterDate] = useState("");
-  const [selected, setSelected] = useState(new Set());
   const [loading, setLoading] = useState(false);
-  const [modalTxn, setModalTxn] = useState(null);
-  const [pickedStatus, setPickedStatus] = useState(null);
-  const [updating, setUpdating] = useState(false);
-  const [hasOva, setHasOva] = useState(false);
-
-  const checkOva = useCallback(async () => {
-    try {
-      const res = await api.getOvaRecords();
-      setHasOva(res.records && res.records.length > 0);
-    } catch (e) {}
-  }, []);
 
   const statusFilter = view === "all" ? filterStatus : view;
 
@@ -48,67 +36,9 @@ export default function TransactionsPage({ view, toast, onStatsChange }) {
     }
   }, [page, search, statusFilter, filterTelco, filterDate]);
 
-  useEffect(() => { setPage(1); setSelected(new Set()); }, [view, filterStatus, filterTelco, search, filterDate]);
-  useEffect(() => { load(); checkOva(); }, [load, checkOva]);
+  useEffect(() => { setPage(1); }, [view, filterStatus, filterTelco, search, filterDate]);
+  useEffect(() => { load(); }, [load]);
 
-  const openModal = (txn) => {
-    if (!hasOva) {
-      toast("Please upload OVA data first", "error");
-      return;
-    }
-    if (!txn.ovaMatched) {
-      toast("Cannot be changed: No OVA data matching this transaction.", "error");
-      return;
-    }
-    setModalTxn(txn);
-    setPickedStatus(null);
-  };
-  const closeModal = () => { setModalTxn(null); setPickedStatus(null); };
-
-  const confirmUpdate = async () => {
-    if (!pickedStatus || !modalTxn) return;
-    setUpdating(true);
-    try {
-      await api.updateTransaction(modalTxn.id, { status: pickedStatus });
-      toast(`${modalTxn.id} → ${pickedStatus}`);
-      closeModal();
-      load();
-    } catch (e) { toast(e.message, "error"); }
-    finally { setUpdating(false); }
-  };
-
-  const bulkAction = async (status) => {
-    if (!hasOva) {
-      toast("Please upload OVA data first", "error");
-      return;
-    }
-    const ids = [...selected];
-    if (!ids.length) return;
-    const invalidTxns = ids.filter(id => !data.find(t => t.id === id)?.ovaMatched);
-    if (invalidTxns.length > 0) {
-      toast("Select only transactions that have matched OVA data.", "error");
-      return;
-    }
-    try {
-      const res = await api.bulkUpdate(ids, status);
-      toast(`${res.updated} transactions → ${status}`);
-      setSelected(new Set());
-      load();
-    } catch (e) { toast(e.message, "error"); }
-  };
-
-  const toggleAll = (checked) => {
-    if (checked) setSelected(new Set(data.map((t) => t.id)));
-    else setSelected(new Set());
-  };
-
-  const toggleOne = (id, checked) => {
-    const s = new Set(selected);
-    if (checked) s.add(id); else s.delete(id);
-    setSelected(s);
-  };
-
-  const selCount = [...selected].filter((id) => data.find((t) => t.id === id && t.status === "pending")).length;
   const viewLabel = { all: "All Transactions", pending: "Pending Transactions", successful: "Successful Transactions", failed: "Failed Transactions" }[view] || "";
 
   return (
@@ -121,12 +51,6 @@ export default function TransactionsPage({ view, toast, onStatsChange }) {
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           {view === "pending" && <Btn onClick={() => api.exportCSV("pending")}>↓ Export CSV</Btn>}
-          {selCount > 0 && (
-            <>
-              <Btn variant="danger" onClick={() => bulkAction("failed")}>Mark {selCount} Failed</Btn>
-              <Btn variant="primary" onClick={() => bulkAction("successful")}>Mark {selCount} Successful</Btn>
-            </>
-          )}
         </div>
       </div>
 
@@ -180,17 +104,15 @@ export default function TransactionsPage({ view, toast, onStatsChange }) {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
             <thead>
               <tr style={{ borderBottom: "1px solid var(--border)" }}>
-                <th style={th}><input type="checkbox" onChange={(e) => toggleAll(e.target.checked)} checked={selected.size === data.length && data.length > 0} style={{ accentColor: "var(--teal-600)" }} /></th>
-                {["Txn ID","UniWallet ID","Full Name","Date","Time","Telco","Amount","Prev Status","Current Status","Network ID","OVA Status","Action"].map((h) => <th key={h} style={th}>{h}</th>)}
+                {["Txn ID","UniWallet ID","Full Name","Date","Time","Telco","Amount","Prev Status","Uniwallet Status","Network ID","OVA Status"].map((h) => <th key={h} style={th}>{h}</th>)}
               </tr>
             </thead>
             <tbody>
               {data.length === 0 && !loading && (
-                <tr><td colSpan={12} style={{ textAlign: "center", padding: "48px 0", color: "var(--text-muted)", fontSize: 14 }}>No transactions found</td></tr>
+                <tr><td colSpan={11} style={{ textAlign: "center", padding: "48px 0", color: "var(--text-muted)", fontSize: 14 }}>No transactions found</td></tr>
               )}
               {data.map((t) => (
-                <tr key={t.id} style={{ borderBottom: "1px solid var(--border)", background: selected.has(t.id) ? "var(--teal-50)" : "transparent", transition: "background 0.15s ease" }}>
-                  <td style={td}><input type="checkbox" checked={selected.has(t.id)} onChange={(e) => toggleOne(t.id, e.target.checked)} style={{ accentColor: "var(--teal-600)" }} /></td>
+                <tr key={t.id} style={{ borderBottom: "1px solid var(--border)", transition: "background 0.15s ease" }}>
                   <td style={{ ...td, fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--text-secondary)" }}>{t.id}</td>
                   <td style={{ ...td, fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--text-secondary)" }}>{t.uniwalletId}</td>
                   <td style={{ ...td, fontWeight: 500, fontSize: 13, color: "var(--text-primary)" }}>{t.name}</td>
@@ -201,12 +123,7 @@ export default function TransactionsPage({ view, toast, onStatsChange }) {
                   <td style={td}>{t.previousStatus ? <Badge status={t.previousStatus} /> : <span style={{ color: "var(--text-muted)", fontSize: 12 }}>—</span>}</td>
                   <td style={td}><Badge status={t.status} /></td>
                   <td style={{ ...td, fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-muted)" }}>{t.networkId || "—"}</td>
-                  <td style={td}><Badge status={t.ovaStatus} /></td>
-                  <td style={td}>
-                    {t.status === "pending"
-                      ? <Btn size="sm" onClick={() => openModal(t)}>Update</Btn>
-                      : <span style={{ color: "var(--text-muted)", fontSize: 12 }}>—</span>}
-                  </td>
+                  <td style={td}>{t.ovaStatus ? <Badge status={t.ovaStatus} /> : <span style={{ color: "var(--text-muted)", fontSize: 12 }}>—</span>}</td>
                 </tr>
               ))}
             </tbody>
@@ -225,48 +142,6 @@ export default function TransactionsPage({ view, toast, onStatsChange }) {
           </div>
         </div>
       </div>
-
-      {/* Update Modal */}
-      <Modal open={!!modalTxn} onClose={closeModal} width={400}>
-        <h2 style={{ fontSize: 15, fontWeight: 600, color: "#1a1917", marginBottom: 4 }}>Update Transaction Status</h2>
-        <p style={{ fontSize: 13, color: "#6b6860", marginBottom: 14, lineHeight: 1.5 }}>Change status to match the OVA record.</p>
-
-        {modalTxn && (
-          <div style={{ background: "#f7f6f2", borderRadius: 8, padding: 12, marginBottom: 14, fontSize: 12, display: "flex", flexDirection: "column", gap: 5 }}>
-            {[["Transaction ID", modalTxn.id], ["UniWallet ID", modalTxn.uniwalletId], ["Customer", modalTxn.name], ["Telco", modalTxn.telco], ["Amount", `GHS ${modalTxn.amount?.toFixed(2)}`], ["Date / Time", `${modalTxn.date} ${modalTxn.time}`], ["OVA Status", modalTxn.ovaStatus], ["Current Status", modalTxn.status]].map(([k, v]) => (
-              <div key={k} style={{ display: "flex", justifyContent: "space-between" }}>
-                <span style={{ color: "#9e9b94" }}>{k}</span>
-                <span style={{ fontWeight: 500, color: "#1a1917" }}>{v}</span>
-              </div>
-            ))}
-          </div>
-        )}
-
-        <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-          {["successful", "failed"].map((s) => (
-            <button
-              key={s}
-              onClick={() => setPickedStatus(s)}
-              style={{
-                flex: 1, padding: "9px 0", borderRadius: 8, fontSize: 12, fontWeight: 500, cursor: "pointer", fontFamily: "inherit",
-                border: pickedStatus === s ? `1.5px solid ${s === "successful" ? "#1d9e75" : "#e24b4a"}` : "0.5px solid rgba(0,0,0,0.12)",
-                background: pickedStatus === s ? (s === "successful" ? "#e1f5ee" : "#fcebeb") : "transparent",
-                color: pickedStatus === s ? (s === "successful" ? "#0f6e56" : "#a32d2d") : "#6b6860",
-                transition: "all 0.12s",
-              }}
-            >
-              {s === "successful" ? "✓ Mark Successful" : "✕ Mark Failed"}
-            </button>
-          ))}
-        </div>
-
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-          <Btn onClick={closeModal}>Cancel</Btn>
-          <Btn variant="primary" onClick={confirmUpdate} disabled={!pickedStatus || updating}>
-            {updating ? <Spinner size={12} color="#fff" /> : null} Confirm Update
-          </Btn>
-        </div>
-      </Modal>
     </div>
   );
 }

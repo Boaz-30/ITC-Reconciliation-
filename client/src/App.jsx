@@ -3,6 +3,7 @@ import Sidebar from "./components/Sidebar.jsx";
 import TransactionsPage from "./pages/TransactionsPage.jsx";
 import UploadPage from "./pages/UploadPage.jsx";
 import ReconcilePage from "./pages/ReconcilePage.jsx";
+import AuditLogPage from "./pages/AuditLogPage.jsx";
 import { ToastStack } from "./components/UI.jsx";
 import { useToast } from "./hooks/useToast.js";
 
@@ -62,6 +63,9 @@ export default function App() {
           )}
           {view === "reconcile" && (
             <ReconcilePage toast={toast} onStatsChange={setStats} setView={handleViewChange} />
+          )}
+          {view === "audit" && (
+            <AuditLogPage toast={toast} />
           )}
         </main>
       </div>

@@ -1,10 +1,16 @@
 import React, { useState, useRef } from "react";
 import { api } from "../utils/api.js";
-import { Btn, Spinner } from "../components/UI.jsx";
+import { Btn, Spinner, LoadingOverlay } from "../components/UI.jsx";
 
-function UploadZone({ title, subtitle, expectedCols, onFile, uploading, result, preview, headers, downloadSample, accept }) {
+function UploadZone({ title, subtitle, expectedCols, onFiles, uploading, result, preview, headers, downloadSample, accept, multiple }) {
   const [dragging, setDragging] = useState(false);
   const inputRef = useRef();
+
+  const handleFiles = (fileList) => {
+    const files = Array.from(fileList);
+    if (files.length === 0) return;
+    onFiles(files);
+  };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -16,7 +22,7 @@ function UploadZone({ title, subtitle, expectedCols, onFile, uploading, result, 
         <div
           onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
           onDragLeave={() => setDragging(false)}
-          onDrop={(e) => { e.preventDefault(); setDragging(false); onFile(e.dataTransfer.files[0]); }}
+          onDrop={(e) => { e.preventDefault(); setDragging(false); handleFiles(e.dataTransfer.files); }}
           onClick={() => inputRef.current?.click()}
           style={{
             background: dragging ? "var(--teal-50)" : "var(--bg-input)",
@@ -27,14 +33,18 @@ function UploadZone({ title, subtitle, expectedCols, onFile, uploading, result, 
             marginBottom: 20
           }}
         >
-          <input ref={inputRef} type="file" accept={accept} style={{ display: "none" }} onChange={(e) => onFile(e.target.files[0])} />
+          <input ref={inputRef} type="file" accept={accept} multiple={multiple} style={{ display: "none" }} onChange={(e) => handleFiles(e.target.files)} />
           {uploading ? (
             <><Spinner size={28} /><p style={{ fontSize: 13, color: "var(--text-secondary)", marginTop: 12 }}>Processing…</p></>
           ) : (
             <>
               <span style={{ fontSize: 32, marginBottom: 8, filter: "drop-shadow(0 2px 4px rgba(0,0,0,0.1))" }}>📄</span>
-              <p style={{ fontSize: 13, fontWeight: 500, color: "var(--text-primary)", marginBottom: 4 }}>Drop CSV here</p>
-              <p style={{ fontSize: 11, color: "var(--text-muted)" }}>or click to browse</p>
+              <p style={{ fontSize: 13, fontWeight: 500, color: "var(--text-primary)", marginBottom: 4 }}>
+                {multiple ? "Drop CSV file(s) here" : "Drop CSV here"}
+              </p>
+              <p style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                {multiple ? "Select one or multiple files" : "or click to browse"}
+              </p>
             </>
           )}
         </div>
@@ -55,17 +65,25 @@ function UploadZone({ title, subtitle, expectedCols, onFile, uploading, result, 
         <div className="fade-up" style={{ background: "var(--bg-surface)", border: "1px solid var(--border)", borderRadius: "var(--radius-lg)", padding: 20, boxShadow: "0 4px 20px -2px rgba(0,0,0,0.02)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
             <div style={{ width: 32, height: 32, borderRadius: "50%", background: "var(--teal-50)", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--teal-600)", fontSize: 16 }}>✓</div>
-            <span style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)" }}>File uploaded</span>
+            <span style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)" }}>
+              {result.filesProcessed > 1 ? `${result.filesProcessed} files uploaded` : "File uploaded"}
+            </span>
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 20 }}>
+          <div style={{ display: "grid", gridTemplateColumns: result.matched !== undefined ? "1fr 1fr 1fr" : "1fr 1fr", gap: 10, marginBottom: 20 }}>
              <div style={{ background: "var(--bg-input)", borderRadius: "var(--radius-sm)", padding: "12px 14px" }}>
                <div style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 500, marginBottom: 4 }}>Total Records</div>
                <div style={{ fontSize: 24, fontWeight: 600, color: "var(--text-primary)" }}>{result.records || result.total}</div>
              </div>
+             {result.newRecords !== undefined && (
+               <div style={{ background: "var(--blue-50)", borderRadius: "var(--radius-sm)", padding: "12px 14px", border: "1px solid var(--blue-100)" }}>
+                 <div style={{ fontSize: 11, color: "var(--blue-700)", fontWeight: 500, marginBottom: 4 }}>New Records</div>
+                 <div style={{ fontSize: 24, fontWeight: 600, color: "var(--blue-700)" }}>{result.newRecords}</div>
+               </div>
+             )}
              {(result.matched !== undefined) && (
              <div style={{ background: "var(--teal-50)", borderRadius: "var(--radius-sm)", padding: "12px 14px", border: "1px solid var(--teal-100)" }}>
-               <div style={{ fontSize: 11, color: "var(--teal-700)", fontWeight: 500, marginBottom: 4 }}>Matched against app</div>
+               <div style={{ fontSize: 11, color: "var(--teal-700)", fontWeight: 500, marginBottom: 4 }}>Matched with data</div>
                <div style={{ fontSize: 24, fontWeight: 600, color: "var(--teal-700)" }}>{result.matched}</div>
              </div>
              )}
@@ -120,14 +138,15 @@ export default function UploadPage({ toast, onUploaded }) {
     document.body.removeChild(a);
   };
 
-  const handleAppFile = async (file) => {
-    if (!file || !file.name.endsWith(".csv")) { toast("Please upload a CSV file", "error"); return; }
+  const handleAppFiles = async (files) => {
+    const csvFiles = files.filter(f => f.name.endsWith(".csv"));
+    if (csvFiles.length === 0) { toast("Please upload CSV file(s)", "error"); return; }
     setAppUploading(true);
     try {
-      const res = await api.uploadTransactions(file);
+      const res = await api.uploadTransactions(csvFiles);
       if (res.success) {
         setAppResult(res);
-        toast(`App transactions uploaded successfully`, "success");
+        toast(`${res.filesProcessed} file${res.filesProcessed > 1 ? "s" : ""} uploaded — ${res.newRecords} new records`, "success");
         try {
           const pRes = await api.getTransactions({ limit: 5 });
           setAppPreview(pRes.data);
@@ -139,14 +158,15 @@ export default function UploadPage({ toast, onUploaded }) {
     finally { setAppUploading(false); }
   };
 
-  const handleOvaFile = async (file) => {
-    if (!file || !file.name.endsWith(".csv")) { toast("Please upload a CSV file", "error"); return; }
+  const handleOvaFiles = async (files) => {
+    const csvFiles = files.filter(f => f.name.endsWith(".csv"));
+    if (csvFiles.length === 0) { toast("Please upload CSV file(s)", "error"); return; }
     setOvaUploading(true);
     try {
-      const res = await api.uploadOva(file);
+      const res = await api.uploadOva(csvFiles);
       if (res.success) {
         setOvaResult(res);
-        toast(`OVA records uploaded`, "success");
+        toast(`${res.filesProcessed} OVA file${res.filesProcessed > 1 ? "s" : ""} uploaded — ${res.newRecords} new records`, "success");
         try {
           const pRes = await api.getOvaRecords();
           setOvaPreview(pRes.records.slice(0, 5));
@@ -160,36 +180,44 @@ export default function UploadPage({ toast, onUploaded }) {
 
   return (
     <div className="fade-up" style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+      <LoadingOverlay
+        visible={appUploading || ovaUploading}
+        title={appUploading ? "Uploading Uniwallet Data…" : "Uploading OVA Data…"}
+        subtitle="Parsing and processing your CSV file(s). This may take a moment."
+      />
+
       <div>
         <h1 style={{ fontSize: 24, fontWeight: 600, color: "var(--text-primary)", letterSpacing: "-0.01em" }}>Upload Data Files</h1>
-        <p style={{ fontSize: 14, color: "var(--text-secondary)", marginTop: 4 }}>Upload your App Support transactions and OVA records for reconciliation.</p>
+        <p style={{ fontSize: 14, color: "var(--text-secondary)", marginTop: 4 }}>Upload your Uniwallet transactions and OVA records for reconciliation. You can upload multiple files at once.</p>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(400px, 1fr))", gap: 24 }}>
         <UploadZone
-          title="App Support Transactions"
+          title="Uniwallet Transactions"
           subtitle="Your system's internal transaction log."
           expectedCols={["ID", "UniWallet ID", "Full Name", "Telco", "Transaction Date", "Time", "Amount", "Status", "Network ID"]}
-          onFile={handleAppFile}
+          onFiles={handleAppFiles}
           uploading={appUploading}
           result={appResult}
           preview={appPreview}
           headers={["id", "name", "amount", "status"]}
           downloadSample={() => downloadSample("transactions")}
           accept=".csv"
+          multiple={true}
         />
 
         <UploadZone
           title="OVA Data"
           subtitle="The external truth provided by the OVA system."
           expectedCols={["UniWallet ID", "Transaction Date", "Status", "Amount", "Merchant ID", "Reference ID", "Telco", "Full Name"]}
-          onFile={handleOvaFile}
+          onFiles={handleOvaFiles}
           uploading={ovaUploading}
           result={ovaResult}
           preview={ovaPreview}
           headers={["uniwalletId", "date", "status", "amount"]}
           downloadSample={() => downloadSample("ova")}
           accept=".csv"
+          multiple={true}
         />
       </div>
 

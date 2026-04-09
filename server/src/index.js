@@ -29,6 +29,8 @@ function randInt(a, b) { return Math.floor(Math.random() * (b - a + 1)) + a; }
 
 let transactions = [];
 let ovaRecords = [];
+let auditLog = [];
+let reconciliationBatches = new Set(); // Track batch IDs of completed reconciliations
 let webhookSecret = "n8n-secret-2024"; // Change this in production
 
 // ── Helper ────────────────────────────────────────────────────────────────────
@@ -39,6 +41,10 @@ function getStats() {
   const failed = transactions.filter((t) => t.status === "failed").length;
   const ovaMatched = transactions.filter((t) => t.ovaMatched).length;
   return { total, successful, pending, failed, ovaMatched };
+}
+
+function generateBatchId() {
+  return `BATCH-${Date.now()}-${randInt(1000, 9999)}`;
 }
 
 // ── AUTH MIDDLEWARE (simple token for n8n) ────────────────────────────────────
@@ -167,32 +173,48 @@ app.post("/api/transactions/bulk-update", (req, res) => {
   res.json({ success: true, updated, stats: getStats() });
 });
 
-// POST /api/ova/upload — upload OVA CSV from dashboard
-app.post("/api/ova/upload", upload.single("file"), (req, res) => {
-  if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+// POST /api/ova/upload — upload OVA CSV from dashboard (supports multiple files)
+app.post("/api/ova/upload", upload.array("files", 20), (req, res) => {
+  // Support both single file (legacy) and multiple files
+  const files = req.files || (req.file ? [req.file] : []);
+  if (files.length === 0) return res.status(400).json({ error: "No file uploaded" });
   try {
-    const content = req.file.buffer.toString("utf-8");
-    const records = parse(content, { columns: true, skip_empty_lines: true, trim: true });
-    ovaRecords = records.map((r) => ({
-      uniwalletId: r["UniWallet ID"] || r.uniwalletId || r.UniWalletId || "",
-      date: r["Transaction Date"] || r.date || r.Date || "",
-      status: (r.Status || r.status || "").toLowerCase(),
-      amount: parseFloat(r.Amount || r.amount || 0),
-      merchantId: r["Merchant ID"] || r.merchantId || "",
-      referenceId: r["Reference ID"] || r.referenceId || "",
-      telco: r.Telco || r.telco || "",
-      name: r["Full Name"] || r.name || r.Name || "",
-    }));
+    let totalNewRecords = 0;
+    files.forEach((file) => {
+      const content = file.buffer.toString("utf-8");
+      const records = parse(content, { columns: true, skip_empty_lines: true, trim: true });
+      const parsed = records.map((r) => ({
+        uniwalletId: r["UniWallet ID"] || r.uniwalletId || r.UniWalletId || "",
+        date: r["Transaction Date"] || r.date || r.Date || "",
+        status: (r.Status || r.status || "").toLowerCase(),
+        amount: parseFloat(r.Amount || r.amount || 0),
+        merchantId: r["Merchant ID"] || r.merchantId || "",
+        referenceId: r["Reference ID"] || r.referenceId || "",
+        telco: r.Telco || r.telco || "",
+        name: r["Full Name"] || r.name || r.Name || "",
+      }));
+      // Append to existing OVA records (support multiple files)
+      ovaRecords.push(...parsed);
+      totalNewRecords += parsed.length;
+    });
+
+    // De-duplicate OVA records by uniwalletId+date (latest wins)
+    const ovaMap = new Map();
+    ovaRecords.forEach((r) => {
+      ovaMap.set(`${r.uniwalletId}|${r.date}`, r);
+    });
+    ovaRecords = Array.from(ovaMap.values());
+
     // Auto-match: mark transactions that share uniwalletId+date with OVA
-    const ovaMap = new Map(ovaRecords.map((r) => [`${r.uniwalletId}|${r.date}`, r]));
+    const matchMap = new Map(ovaRecords.map((r) => [`${r.uniwalletId}|${r.date}`, r]));
     transactions.forEach((t) => {
       const key = `${t.uniwalletId}|${t.date}`;
-      if (ovaMap.has(key)) {
+      if (matchMap.has(key)) {
         t.ovaMatched = true;
-        t.ovaStatus = ovaMap.get(key).status;
+        t.ovaStatus = matchMap.get(key).status;
       }
     });
-    res.json({ success: true, records: ovaRecords.length, matched: transactions.filter((t) => t.ovaMatched).length });
+    res.json({ success: true, records: ovaRecords.length, newRecords: totalNewRecords, filesProcessed: files.length, matched: transactions.filter((t) => t.ovaMatched).length });
   } catch (err) {
     res.status(400).json({ error: "Failed to parse CSV: " + err.message });
   }
@@ -208,19 +230,31 @@ app.delete("/api/ova", (req, res) => {
   res.json({ success: true, stats: getStats() });
 });
 
-// POST /api/transactions/upload — upload App Support Transactions CSV
-app.post("/api/transactions/upload", upload.single("file"), (req, res) => {
-  if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+// POST /api/transactions/upload — upload Uniwallet Transactions CSV (supports multiple files)
+app.post("/api/transactions/upload", upload.array("files", 20), (req, res) => {
+  // Support both single file (legacy) and multiple files
+  const files = req.files || (req.file ? [req.file] : []);
+  if (files.length === 0) return res.status(400).json({ error: "No file uploaded" });
   try {
-    const content = req.file.buffer.toString("utf-8");
-    const records = parse(content, { columns: true, skip_empty_lines: true, trim: true });
-    
-    // Completely overwrite transactions
-    transactions = records.map((r, i) => {
+    let allRecords = [];
+    files.forEach((file) => {
+      const content = file.buffer.toString("utf-8");
+      const records = parse(content, { columns: true, skip_empty_lines: true, trim: true });
+      allRecords.push(...records);
+    });
+
+    // Append to existing transactions or create new
+    const newTxns = allRecords.map((r, i) => {
       const status = (r.Status || r.status || "pending").toLowerCase();
       const telco = r.Telco || r.telco || "";
+      const id = r.ID || r.id || `TXN-${String(transactions.length + i + 1).padStart(4, "0")}`;
+      
+      // Check if this transaction already exists (by ID)
+      const existing = transactions.find(t => t.id === id);
+      if (existing) return null; // Skip duplicates
+      
       return {
-        id: r.ID || r.id || `TXN-${String(i + 1).padStart(4, "0")}`,
+        id,
         uniwalletId: r["UniWallet ID"] || r.uniwalletId || r.UniWalletId || "",
         name: r["Full Name"] || r.name || r.Name || "",
         telco,
@@ -232,12 +266,17 @@ app.post("/api/transactions/upload", upload.single("file"), (req, res) => {
         previousStatus: null,
         ovaStatus: null,
         ovaMatched: false,
+        reconciled: false,
+        reconciledAt: null,
+        reconciledBatchId: null,
         merchantId: r["Merchant ID"] || r.merchantId || "",
         referenceId: r["Reference ID"] || r.referenceId || "",
         updatedAt: null,
         updatedBy: null,
       };
-    });
+    }).filter(Boolean);
+
+    transactions.push(...newTxns);
 
     // Need to auto-match if OVA is already uploaded
     if (ovaRecords.length > 0) {
@@ -251,25 +290,26 @@ app.post("/api/transactions/upload", upload.single("file"), (req, res) => {
       });
     }
 
-    res.json({ success: true, records: transactions.length, matched: transactions.filter((t) => t.ovaMatched).length });
+    res.json({ success: true, records: transactions.length, newRecords: newTxns.length, filesProcessed: files.length, matched: transactions.filter((t) => t.ovaMatched).length });
   } catch (err) {
     res.status(400).json({ error: "Failed to parse CSV: " + err.message });
   }
 });
 
-// DELETE /api/transactions — clear App Support Transactions
+// DELETE /api/transactions — clear Uniwallet Transactions
 app.delete("/api/transactions", (req, res) => {
   transactions = [];
   res.json({ success: true, stats: getStats() });
 });
 
-// GET /api/transactions/sample — download sample App Support CSV
+// GET /api/transactions/sample — download sample Uniwallet Transactions CSV
 app.get("/api/transactions/sample", (req, res) => {
   const d = new Date();
   const dateStr = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
   
+  const appStatuses = ["successful", "successful", "pending"];
   const sampleData = Array.from({ length: 15 }, (_, i) => {
-    const status = rand(STATUSES);
+    const status = rand(appStatuses);
     const telco = rand(TELCOS);
     return [
       `TXN-${pad(i + 1)}`,
@@ -290,7 +330,7 @@ app.get("/api/transactions/sample", (req, res) => {
   const rows = [headers, ...sampleData];
   const csv = rows.map((r) => r.map((c) => `"${c}"`).join(",")).join("\n");
   res.setHeader("Content-Type", "text/csv");
-  res.setHeader("Content-Disposition", `attachment; filename=sample_app_transactions_${Date.now()}.csv`);
+  res.setHeader("Content-Disposition", `attachment; filename=sample_uniwallet_transactions_${Date.now()}.csv`);
   res.send(csv);
 });
 
@@ -304,8 +344,12 @@ app.get("/api/ova/sample", (req, res) => {
   const d = new Date();
   const dateStr = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
   
+  const ovaStatuses = Array(15).fill("successful");
+  ovaStatuses[3] = "failed";
+  ovaStatuses[11] = "failed";
+
   const sampleData = Array.from({ length: 15 }, (_, i) => {
-    const status = rand(STATUSES);
+    const status = ovaStatuses[i];
     const telco = rand(TELCOS);
     return [
       `UW-1000${pad(i + 1)}`,
@@ -330,15 +374,165 @@ app.get("/api/ova/sample", (req, res) => {
 // GET /api/reconciliation — get reconciliation comparison rows
 app.get("/api/reconciliation", (req, res) => {
   const matched = transactions.filter((t) => t.ovaMatched);
-  const mismatched = matched.filter((t) => t.status !== t.ovaStatus && t.status === "pending");
+  const mismatched = matched.filter((t) => t.status === "pending" && t.ovaStatus && t.status !== t.ovaStatus && !t.reconciled);
+  const alreadyReconciled = matched.filter((t) => t.reconciled);
   res.json({
     matched: matched.length,
     mismatched: mismatched.length,
     inSync: matched.length - mismatched.length,
+    alreadyReconciled: alreadyReconciled.length,
     rate: matched.length ? Math.round(((matched.length - mismatched.length) / matched.length) * 100) : 0,
     transactions: matched,
     stats: getStats()
   });
+});
+
+// POST /api/reconciliation/bulk-resolve — bulk auto-resolve all pending mismatches
+app.post("/api/reconciliation/bulk-resolve", (req, res) => {
+  const { updatedBy = "Bulk Reconciliation" } = req.body;
+  
+  // Only resolve transactions that are pending, ova-matched, mismatched, and NOT already reconciled
+  const toResolve = transactions.filter(
+    (t) => t.ovaMatched && t.status === "pending" && t.ovaStatus && t.status !== t.ovaStatus && !t.reconciled
+  );
+  
+  if (toResolve.length === 0) {
+    return res.json({ success: true, resolved: 0, message: "No unreconciled mismatches to resolve", stats: getStats() });
+  }
+  
+  const batchId = generateBatchId();
+  const resolvedIds = [];
+  const auditEntries = [];
+  
+  toResolve.forEach((t) => {
+    const previousStatus = t.status;
+    t.previousStatus = previousStatus;
+    t.status = t.ovaStatus;
+    t.updatedAt = new Date().toISOString();
+    t.updatedBy = updatedBy;
+    t.reconciled = true;
+    t.reconciledAt = new Date().toISOString();
+    t.reconciledBatchId = batchId;
+    
+    if (t.ovaStatus === "successful") {
+      if (!t.networkId) {
+        t.networkId = `NET-${t.telco}-${randInt(100000, 999999)}`;
+      }
+    } else {
+      t.networkId = null;
+    }
+    
+    resolvedIds.push(t.id);
+    auditEntries.push({
+      id: `AUDIT-${Date.now()}-${randInt(1000, 9999)}`,
+      transactionId: t.id,
+      uniwalletId: t.uniwalletId,
+      name: t.name,
+      telco: t.telco,
+      amount: t.amount,
+      date: t.date,
+      previousStatus,
+      newStatus: t.ovaStatus,
+      ovaStatus: t.ovaStatus,
+      reconciledAt: t.reconciledAt,
+      reconciledBy: updatedBy,
+      batchId,
+      confirmed: false,
+    });
+  });
+  
+  auditLog.push(...auditEntries);
+  reconciliationBatches.add(batchId);
+  
+  res.json({
+    success: true,
+    resolved: resolvedIds.length,
+    resolvedIds,
+    batchId,
+    stats: getStats(),
+    message: `Reconciled ${resolvedIds.length} transactions in batch ${batchId}`
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// AUDIT LOG ROUTES
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// GET /api/audit-log — get all audit log entries
+app.get("/api/audit-log", (req, res) => {
+  const { page = 1, limit = 20, batchId, confirmed } = req.query;
+  let result = [...auditLog].reverse(); // Newest first
+  
+  if (batchId) result = result.filter((e) => e.batchId === batchId);
+  if (confirmed === "true") result = result.filter((e) => e.confirmed);
+  if (confirmed === "false") result = result.filter((e) => !e.confirmed);
+  
+  const total = result.length;
+  const pageNum = parseInt(page);
+  const limitNum = parseInt(limit);
+  const data = result.slice((pageNum - 1) * limitNum, pageNum * limitNum);
+  
+  // Calculate summary
+  const totalEntries = auditLog.length;
+  const confirmedCount = auditLog.filter((e) => e.confirmed).length;
+  const pendingConfirmation = auditLog.filter((e) => !e.confirmed).length;
+  const batches = [...new Set(auditLog.map((e) => e.batchId))];
+  
+  res.json({
+    data,
+    total,
+    page: pageNum,
+    pages: Math.ceil(total / limitNum),
+    summary: {
+      totalEntries,
+      confirmedCount,
+      pendingConfirmation,
+      totalBatches: batches.length,
+    }
+  });
+});
+
+// POST /api/audit-log/confirm — confirm audit log entries
+app.post("/api/audit-log/confirm", (req, res) => {
+  const { ids, batchId } = req.body;
+  let confirmed = 0;
+  
+  if (batchId) {
+    // Confirm all entries in a batch
+    auditLog.forEach((entry) => {
+      if (entry.batchId === batchId && !entry.confirmed) {
+        entry.confirmed = true;
+        entry.confirmedAt = new Date().toISOString();
+        confirmed++;
+      }
+    });
+  } else if (Array.isArray(ids)) {
+    // Confirm specific entries
+    ids.forEach((id) => {
+      const entry = auditLog.find((e) => e.id === id);
+      if (entry && !entry.confirmed) {
+        entry.confirmed = true;
+        entry.confirmedAt = new Date().toISOString();
+        confirmed++;
+      }
+    });
+  }
+  
+  res.json({ success: true, confirmed, total: auditLog.length });
+});
+
+// GET /api/audit-log/export — download audit log as CSV
+app.get("/api/audit-log/export", (req, res) => {
+  const headers = ["Audit ID", "Transaction ID", "UniWallet ID", "Name", "Telco", "Amount", "Date", "Previous Status", "New Status", "OVA Status", "Reconciled At", "Reconciled By", "Batch ID", "Confirmed"];
+  const rows = [headers, ...auditLog.map((e) => [
+    e.id, e.transactionId, e.uniwalletId, e.name, e.telco, e.amount, e.date,
+    e.previousStatus, e.newStatus, e.ovaStatus, e.reconciledAt, e.reconciledBy,
+    e.batchId, e.confirmed ? "Yes" : "No"
+  ])];
+  const csv = rows.map((r) => r.map((c) => `"${c}"`).join(",")).join("\n");
+  res.setHeader("Content-Type", "text/csv");
+  res.setHeader("Content-Disposition", `attachment; filename=audit_log_${Date.now()}.csv`);
+  res.send(csv);
 });
 
 // POST /api/trigger-n8n — trigger external n8n workflow for bulk reconciliation
@@ -417,11 +611,13 @@ app.post("/webhook/n8n/auto-reconcile", requireApiKey, (req, res) => {
   let resolved = 0;
   const resolvedIds = [];
   transactions.forEach((t) => {
-    if (t.ovaMatched && t.status === "pending" && t.ovaStatus) {
+    if (t.ovaMatched && t.status === "pending" && t.ovaStatus && !t.reconciled) {
       t.previousStatus = t.status;
       t.status = t.ovaStatus;
       t.updatedAt = new Date().toISOString();
       t.updatedBy = updatedBy;
+      t.reconciled = true;
+      t.reconciledAt = new Date().toISOString();
       if (t.ovaStatus === "successful") {
         if (!t.networkId) {
           t.networkId = `NET-${t.telco}-${randInt(100000, 999999)}`;

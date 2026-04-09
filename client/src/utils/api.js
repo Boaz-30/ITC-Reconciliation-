@@ -19,9 +19,14 @@ export const api = {
     const qs = new URLSearchParams(params).toString();
     return apiFetch(`/transactions?${qs}`);
   },
-  uploadTransactions: (file) => {
+  uploadTransactions: (files) => {
     const fd = new FormData();
-    fd.append("file", file);
+    // Support both single file and array of files
+    if (Array.isArray(files)) {
+      files.forEach((f) => fd.append("files", f));
+    } else {
+      fd.append("files", files);
+    }
     return fetch(BASE + "/transactions/upload", { method: "POST", body: fd }).then((r) => r.json());
   },
   deleteTransactions: () => apiFetch("/transactions", { method: "DELETE" }),
@@ -34,15 +39,33 @@ export const api = {
   getStats: () => apiFetch("/stats"),
 
   // OVA
-  uploadOva: (file) => {
+  uploadOva: (files) => {
     const fd = new FormData();
-    fd.append("file", file);
+    // Support both single file and array of files
+    if (Array.isArray(files)) {
+      files.forEach((f) => fd.append("files", f));
+    } else {
+      fd.append("files", files);
+    }
     return fetch(BASE + "/ova/upload", { method: "POST", body: fd }).then((r) => r.json());
   },
   getOvaRecords: () => apiFetch("/ova/records"),
   deleteOva: () => apiFetch("/ova", { method: "DELETE" }),
   getReconciliation: () => apiFetch("/reconciliation"),
+  bulkResolve: (updatedBy = "Bulk Reconciliation") =>
+    apiFetch("/reconciliation/bulk-resolve", { method: "POST", body: JSON.stringify({ updatedBy }) }),
   triggerN8n: () => apiFetch("/trigger-n8n", { method: "POST" }),
+
+  // Audit Log
+  getAuditLog: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return apiFetch(`/audit-log?${qs}`);
+  },
+  confirmAuditEntries: (body) =>
+    apiFetch("/audit-log/confirm", { method: "POST", body: JSON.stringify(body) }),
+  exportAuditLog: () => {
+    window.open(`${BASE}/audit-log/export`, "_blank");
+  },
 
   // Export CSV
   exportCSV: (status = "pending") => {

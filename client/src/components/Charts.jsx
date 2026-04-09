@@ -1,36 +1,114 @@
 import React, { useEffect, useRef } from "react";
 import { api } from "../utils/api.js";
-import { Chart, ArcElement, BarElement, CategoryScale, LinearScale, Tooltip, Legend, DoughnutController, BarController } from "chart.js";
-Chart.register(ArcElement, BarElement, CategoryScale, LinearScale, Tooltip, Legend, DoughnutController, BarController);
+import { Chart, ArcElement, LineElement, PointElement, CategoryScale, LinearScale, Tooltip, Legend, DoughnutController, LineController, Filler } from "chart.js";
+Chart.register(ArcElement, LineElement, PointElement, CategoryScale, LinearScale, Tooltip, Legend, DoughnutController, LineController, Filler);
 
-let barInst = null, donutInst = null;
+let lineInst = null, donutInst = null;
 
 export default function Charts({ stats }) {
-  const barRef = useRef();
+  const lineRef = useRef();
   const donutRef = useRef();
 
   useEffect(() => {
     api.getStats().then((data) => {
-      // Bar
-      if (barInst) barInst.destroy();
-      const bctx = barRef.current?.getContext("2d");
-      if (bctx) {
-        barInst = new Chart(bctx, {
-          type: "bar",
+      // Line Chart
+      if (lineInst) lineInst.destroy();
+      const lctx = lineRef.current?.getContext("2d");
+      if (lctx) {
+        // Create gradients
+        const successGrad = lctx.createLinearGradient(0, 0, 0, 160);
+        successGrad.addColorStop(0, "rgba(29, 158, 117, 0.18)");
+        successGrad.addColorStop(1, "rgba(29, 158, 117, 0.01)");
+
+        const pendingGrad = lctx.createLinearGradient(0, 0, 0, 160);
+        pendingGrad.addColorStop(0, "rgba(239, 159, 39, 0.14)");
+        pendingGrad.addColorStop(1, "rgba(239, 159, 39, 0.01)");
+
+        const failedGrad = lctx.createLinearGradient(0, 0, 0, 160);
+        failedGrad.addColorStop(0, "rgba(226, 75, 74, 0.12)");
+        failedGrad.addColorStop(1, "rgba(226, 75, 74, 0.01)");
+
+        lineInst = new Chart(lctx, {
+          type: "line",
           data: {
             labels: data.daily.map((d) => d.date.slice(5)),
             datasets: [
-              { label: "Successful", data: data.daily.map((d) => d.successful), backgroundColor: "#1d9e75", stack: "s" },
-              { label: "Pending",    data: data.daily.map((d) => d.pending),    backgroundColor: "#ef9f27", stack: "s" },
-              { label: "Failed",     data: data.daily.map((d) => d.failed),     backgroundColor: "#e24b4a", stack: "s" },
+              {
+                label: "Successful",
+                data: data.daily.map((d) => d.successful),
+                borderColor: "#1d9e75",
+                backgroundColor: successGrad,
+                borderWidth: 2.5,
+                pointRadius: 3,
+                pointHoverRadius: 6,
+                pointBackgroundColor: "#1d9e75",
+                pointBorderColor: "#fff",
+                pointBorderWidth: 2,
+                tension: 0.4,
+                fill: true,
+              },
+              {
+                label: "Pending",
+                data: data.daily.map((d) => d.pending),
+                borderColor: "#ef9f27",
+                backgroundColor: pendingGrad,
+                borderWidth: 2.5,
+                pointRadius: 3,
+                pointHoverRadius: 6,
+                pointBackgroundColor: "#ef9f27",
+                pointBorderColor: "#fff",
+                pointBorderWidth: 2,
+                tension: 0.4,
+                fill: true,
+              },
+              {
+                label: "Failed",
+                data: data.daily.map((d) => d.failed),
+                borderColor: "#e24b4a",
+                backgroundColor: failedGrad,
+                borderWidth: 2.5,
+                pointRadius: 3,
+                pointHoverRadius: 6,
+                pointBackgroundColor: "#e24b4a",
+                pointBorderColor: "#fff",
+                pointBorderWidth: 2,
+                tension: 0.4,
+                fill: true,
+              },
             ],
           },
           options: {
-            responsive: true, maintainAspectRatio: false,
-            plugins: { legend: { display: false }, tooltip: { mode: "index", intersect: false } },
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: "index", intersect: false },
+            plugins: {
+              legend: { display: false },
+              tooltip: {
+                mode: "index",
+                intersect: false,
+                backgroundColor: "rgba(20, 22, 27, 0.92)",
+                titleFont: { size: 11, weight: "600" },
+                bodyFont: { size: 11 },
+                padding: { x: 14, y: 10 },
+                cornerRadius: 10,
+                displayColors: true,
+                boxWidth: 8,
+                boxHeight: 8,
+                boxPadding: 4,
+              },
+            },
             scales: {
-              x: { stacked: true, grid: { display: false }, ticks: { font: { size: 10 }, color: "#9e9b94", maxRotation: 45, autoSkip: false } },
-              y: { stacked: true, grid: { color: "rgba(0,0,0,0.04)" }, ticks: { font: { size: 10 }, color: "#9e9b94" } },
+              x: {
+                grid: { display: false },
+                ticks: { font: { size: 10, family: "Outfit" }, color: "#9e9b94", maxRotation: 45, autoSkip: false },
+                border: { display: false },
+              },
+              y: {
+                grid: { color: "rgba(0,0,0,0.04)", drawBorder: false },
+                ticks: { font: { size: 10, family: "Outfit" }, color: "#9e9b94", stepSize: 1 },
+                border: { display: false },
+                beginAtZero: true,
+              },
             },
           },
         });
@@ -68,16 +146,16 @@ export default function Charts({ stats }) {
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 240px", gap: 12 }}>
-      <div style={{ background: "#fff", border: "0.5px solid rgba(0,0,0,0.08)", borderRadius: 12, padding: 16 }}>
-        <div style={{ fontSize: 12, fontWeight: 500, color: "#1a1917", marginBottom: 12 }}>Transaction volume — last 14 days</div>
-        <div style={{ position: "relative", height: 150 }}><canvas ref={barRef} /></div>
+      <div style={{ background: "var(--bg-surface)", border: "1px solid var(--border)", borderRadius: 16, padding: 20 }}>
+        <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-secondary)", marginBottom: 14, textTransform: "uppercase", letterSpacing: "0.05em" }}>Transaction volume — last 14 days</div>
+        <div style={{ position: "relative", height: 160 }}><canvas ref={lineRef} /></div>
       </div>
-      <div style={{ background: "#fff", border: "0.5px solid rgba(0,0,0,0.08)", borderRadius: 12, padding: 16, display: "flex", flexDirection: "column", alignItems: "center" }}>
-        <div style={{ fontSize: 12, fontWeight: 500, color: "#1a1917", marginBottom: 10, alignSelf: "flex-start" }}>Status breakdown</div>
+      <div style={{ background: "var(--bg-surface)", border: "1px solid var(--border)", borderRadius: 16, padding: 20, display: "flex", flexDirection: "column", alignItems: "center" }}>
+        <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-secondary)", marginBottom: 12, alignSelf: "flex-start", textTransform: "uppercase", letterSpacing: "0.05em" }}>Status breakdown</div>
         <div style={{ position: "relative", width: 130, height: 130 }}><canvas ref={donutRef} /></div>
         <div style={{ display: "flex", flexDirection: "column", gap: 5, marginTop: 10, width: "100%" }}>
           {legendItems.map((l) => (
-            <div key={l.label} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 11, color: "#6b6860" }}>
+            <div key={l.label} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 11, color: "var(--text-secondary)" }}>
               <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 <span style={{ width: 8, height: 8, borderRadius: 2, background: l.color, flexShrink: 0 }} />
                 {l.label}

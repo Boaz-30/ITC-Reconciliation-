@@ -113,3 +113,38 @@ export function MetricCard({ label, value, sub, accent }) {
     </div>
   );
 }
+
+// ── Loading Overlay ───────────────────────────────────────────────────────────
+export function LoadingOverlay({ visible, title = "Processing…", subtitle = "Please wait while we process your request." }) {
+  if (!visible) return null;
+  return (
+    <div className="loading-overlay" style={{
+      position: "fixed", inset: 0, zIndex: 500,
+      background: "rgba(0,0,0,0.45)", backdropFilter: "blur(8px)",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      animation: "fadeIn 0.2s ease",
+    }}>
+      <div style={{
+        background: "var(--bg-surface)", borderRadius: "var(--radius-xl)",
+        border: "1px solid var(--border)", padding: "40px 48px",
+        display: "flex", flexDirection: "column", alignItems: "center", gap: 20,
+        boxShadow: "0 32px 64px -16px rgba(0,0,0,0.28)",
+        animation: "fadeUp 0.35s cubic-bezier(0.2, 0.8, 0.2, 1)",
+        maxWidth: 380, width: "90vw", textAlign: "center",
+      }}>
+        <div className="loading-ring">
+          <div className="loading-ring-inner" />
+        </div>
+        <div>
+          <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text-primary)", marginBottom: 6 }}>{title}</div>
+          <div style={{ fontSize: 13, color: "var(--text-muted)", lineHeight: 1.5 }}>{subtitle}</div>
+        </div>
+        <div style={{ display: "flex", gap: 4, marginTop: 4 }}>
+          <span className="loading-dot" style={{ animationDelay: "0s" }} />
+          <span className="loading-dot" style={{ animationDelay: "0.15s" }} />
+          <span className="loading-dot" style={{ animationDelay: "0.3s" }} />
+        </div>
+      </div>
+    </div>
+  );
+}

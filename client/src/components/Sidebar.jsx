@@ -10,6 +10,7 @@ const NAV = [
   { id: "upload",     label: "Upload Data Files", dot: "#7F77DD" },
   { section: "Reconciliation" },
   { id: "reconcile",  label: "Compare & Match",   dot: "#378ADD" },
+  { id: "audit",      label: "Audit Log",          dot: "#9B6DD7" },
 ];
 
 export default function Sidebar({ view, setView, stats }) {
