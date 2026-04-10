@@ -6,32 +6,7 @@
   --font-sans: "Outfit", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", monospace;
 
-  --bg-app:     #f4f6fa;
-  --bg-surface: #ffffff;
-  --bg-hover:   #f0f2f7;
-  --bg-input:   #f7f9fc;
-
-  --border:     rgba(0,0,0,0.06);
-  --border-md:  rgba(0,0,0,0.12);
-
-  --text-primary:   #1a1d24;
-  --text-secondary: #636b7b;
-  --text-muted:     #8f96a6;
-
-  --teal-50:  #e0fcf2; --teal-100: #acf3d7; --teal-600: #0a8f6c; --teal-700: #1ab088;
-  --amber-50: #fff5e0; --amber-100:#ffe0a0; --amber-600:#a06a0a; --amber-700:#e39e24;
-  --red-50:   #ffeeee; --red-100:  #ffc8c8; --red-600:  #b63636; --red-700:  #ed5a5a;
-  --blue-50:  #e6f1fc; --blue-100: #b9dafb; --blue-600: #1d6ed8; --blue-700: #4691f1;
-  --purple-50:#f3f0ff; --purple-600:#7b5ee0;
-  --gray-100: #e2e4ea; --gray-600: #747986;
-
-  --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 18px;
-  --radius-xl: 24px;
-}
-
-[data-theme="dark"] {
+  /* Dark theme as default (only theme) */
   --bg-app:     #0b0d10;
   --bg-surface: #14161b;
   --bg-hover:   #1d2028;
@@ -50,6 +25,11 @@
   --blue-50:  #0b2649; --blue-100: #123e7a; --blue-600: #559cf4; --blue-700: #7eb6f8;
   --purple-50:#1e1b42; --purple-600:#8e74f4;
   --gray-100: #333640; --gray-600: #b2b6c1;
+
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 18px;
+  --radius-xl: 24px;
 }
 
 html { font-size: 16px; }
@@ -59,7 +39,6 @@ body {
   color: var(--text-primary);
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
-  transition: background 0.3s ease, color 0.3s ease;
 }
 
 /* Glassmorphism Classes */
@@ -73,7 +52,7 @@ body {
 /* Header */
 header {
   background: var(--bg-surface) !important;
-  box-shadow: 0 4px 20px -2px rgba(0,0,0,0.03);
+  box-shadow: 0 4px 20px -2px rgba(0,0,0,0.15);
 }
 
 /* Animations & Hover */
@@ -155,8 +134,13 @@ tr:hover {
   }
 }
 
-/* Scrollbar */
+/* Scrollbar (dark) */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border-md); border-radius: 99px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+/* Native inputs dark mode */
+input, select, textarea {
+  color-scheme: dark;
+}

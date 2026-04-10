@@ -77,7 +77,7 @@ export default function TransactionsPage({ view, toast, onStatsChange }) {
             />
           </div>
           
-          <input type="date" value={filterDate} onChange={(e) => setFilterDate(e.target.value)} style={{ fontSize: 13, padding: "7px 12px", border: "1px solid var(--border-md)", borderRadius: "var(--radius-sm)", background: "var(--bg-input)", color: "var(--text-primary)", fontFamily: "inherit", colorScheme: "var(--text-primary)" === "#fff" ? "dark" : "light" }} title="Filter by date" />
+          <input type="date" value={filterDate} onChange={(e) => setFilterDate(e.target.value)} style={{ fontSize: 13, padding: "7px 12px", border: "1px solid var(--border-md)", borderRadius: "var(--radius-sm)", background: "var(--bg-input)", color: "var(--text-primary)", fontFamily: "inherit", colorScheme: "dark" }} title="Filter by date" />
 
           {view === "all" && (
             <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} style={{ fontSize: 13, padding: "8px 12px", border: "1px solid var(--border-md)", borderRadius: "var(--radius-sm)", background: "var(--bg-input)", color: "var(--text-primary)", fontFamily: "inherit" }}>

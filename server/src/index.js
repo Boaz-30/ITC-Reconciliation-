@@ -371,9 +371,33 @@ app.get("/api/ova/sample", (req, res) => {
   res.send(csv);
 });
 
-// GET /api/reconciliation — get reconciliation comparison rows
+// GET /api/merchants — list unique merchant IDs with transaction counts
+app.get("/api/merchants", (req, res) => {
+  const merchantMap = new Map();
+  transactions.forEach((t) => {
+    const mid = t.merchantId || "UNKNOWN";
+    if (!merchantMap.has(mid)) {
+      merchantMap.set(mid, { merchantId: mid, total: 0, pending: 0, successful: 0, failed: 0, ovaMatched: 0, unreconciled: 0 });
+    }
+    const m = merchantMap.get(mid);
+    m.total++;
+    if (t.status === "pending") m.pending++;
+    if (t.status === "successful") m.successful++;
+    if (t.status === "failed") m.failed++;
+    if (t.ovaMatched) m.ovaMatched++;
+    if (t.ovaMatched && t.status === "pending" && t.ovaStatus && t.status !== t.ovaStatus && !t.reconciled) m.unreconciled++;
+  });
+  const merchants = Array.from(merchantMap.values()).sort((a, b) => b.total - a.total);
+  res.json({ merchants, total: merchants.length });
+});
+
+// GET /api/reconciliation — get reconciliation comparison rows (optional merchantId filter)
 app.get("/api/reconciliation", (req, res) => {
-  const matched = transactions.filter((t) => t.ovaMatched);
+  const { merchantId } = req.query;
+  let matched = transactions.filter((t) => t.ovaMatched);
+  if (merchantId && merchantId !== "all") {
+    matched = matched.filter((t) => t.merchantId === merchantId);
+  }
   const mismatched = matched.filter((t) => t.status === "pending" && t.ovaStatus && t.status !== t.ovaStatus && !t.reconciled);
   const alreadyReconciled = matched.filter((t) => t.reconciled);
   res.json({
@@ -387,14 +411,19 @@ app.get("/api/reconciliation", (req, res) => {
   });
 });
 
-// POST /api/reconciliation/bulk-resolve — bulk auto-resolve all pending mismatches
+// POST /api/reconciliation/bulk-resolve — bulk auto-resolve pending mismatches (optional merchantId filter)
 app.post("/api/reconciliation/bulk-resolve", (req, res) => {
-  const { updatedBy = "Bulk Reconciliation" } = req.body;
+  const { updatedBy = "Bulk Reconciliation", merchantId } = req.body;
   
   // Only resolve transactions that are pending, ova-matched, mismatched, and NOT already reconciled
-  const toResolve = transactions.filter(
+  let toResolve = transactions.filter(
     (t) => t.ovaMatched && t.status === "pending" && t.ovaStatus && t.status !== t.ovaStatus && !t.reconciled
   );
+  
+  // If merchantId is provided, only resolve for that merchant
+  if (merchantId && merchantId !== "all") {
+    toResolve = toResolve.filter((t) => t.merchantId === merchantId);
+  }
   
   if (toResolve.length === 0) {
     return res.json({ success: true, resolved: 0, message: "No unreconciled mismatches to resolve", stats: getStats() });
@@ -437,6 +466,7 @@ app.post("/api/reconciliation/bulk-resolve", (req, res) => {
       reconciledAt: t.reconciledAt,
       reconciledBy: updatedBy,
       batchId,
+      merchantId: t.merchantId || "",
       confirmed: false,
     });
   });
@@ -449,8 +479,9 @@ app.post("/api/reconciliation/bulk-resolve", (req, res) => {
     resolved: resolvedIds.length,
     resolvedIds,
     batchId,
+    merchantId: merchantId || "all",
     stats: getStats(),
-    message: `Reconciled ${resolvedIds.length} transactions in batch ${batchId}`
+    message: `Reconciled ${resolvedIds.length} transactions${merchantId && merchantId !== "all" ? ` for merchant ${merchantId}` : ""} in batch ${batchId}`
   });
 });
 
@@ -460,12 +491,23 @@ app.post("/api/reconciliation/bulk-resolve", (req, res) => {
 
 // GET /api/audit-log — get all audit log entries
 app.get("/api/audit-log", (req, res) => {
-  const { page = 1, limit = 20, batchId, confirmed } = req.query;
+  const { page = 1, limit = 20, batchId, confirmed, dateFrom, dateTo } = req.query;
   let result = [...auditLog].reverse(); // Newest first
   
   if (batchId) result = result.filter((e) => e.batchId === batchId);
   if (confirmed === "true") result = result.filter((e) => e.confirmed);
   if (confirmed === "false") result = result.filter((e) => !e.confirmed);
+  // Date range filtering on reconciledAt
+  if (dateFrom) {
+    const from = new Date(dateFrom);
+    from.setHours(0, 0, 0, 0);
+    result = result.filter((e) => e.reconciledAt && new Date(e.reconciledAt) >= from);
+  }
+  if (dateTo) {
+    const to = new Date(dateTo);
+    to.setHours(23, 59, 59, 999);
+    result = result.filter((e) => e.reconciledAt && new Date(e.reconciledAt) <= to);
+  }
   
   const total = result.length;
   const pageNum = parseInt(page);
@@ -490,6 +532,60 @@ app.get("/api/audit-log", (req, res) => {
       totalBatches: batches.length,
     }
   });
+});
+
+// GET /api/audit-log/batches — list all reconciliation batches with summaries
+app.get("/api/audit-log/batches", (req, res) => {
+  const { dateFrom, dateTo } = req.query;
+  const batchMap = new Map();
+  
+  auditLog.forEach((entry) => {
+    if (!batchMap.has(entry.batchId)) {
+      batchMap.set(entry.batchId, {
+        batchId: entry.batchId,
+        entries: 0,
+        confirmed: 0,
+        pending: 0,
+        reconciledAt: entry.reconciledAt,
+        reconciledBy: entry.reconciledBy,
+        merchants: new Set(),
+        totalAmount: 0,
+        earliestDate: entry.reconciledAt,
+        latestDate: entry.reconciledAt,
+      });
+    }
+    const b = batchMap.get(entry.batchId);
+    b.entries++;
+    if (entry.confirmed) b.confirmed++;
+    else b.pending++;
+    if (entry.merchantId) b.merchants.add(entry.merchantId);
+    b.totalAmount += entry.amount || 0;
+    if (entry.reconciledAt && entry.reconciledAt < b.earliestDate) b.earliestDate = entry.reconciledAt;
+    if (entry.reconciledAt && entry.reconciledAt > b.latestDate) b.latestDate = entry.reconciledAt;
+  });
+  
+  let batches = Array.from(batchMap.values()).map((b) => ({
+    ...b,
+    merchants: [...b.merchants],
+    merchantCount: b.merchants.size,
+  }));
+  
+  // Sort newest first
+  batches.sort((a, b) => (b.reconciledAt || "").localeCompare(a.reconciledAt || ""));
+  
+  // Date range filtering
+  if (dateFrom) {
+    const from = new Date(dateFrom);
+    from.setHours(0, 0, 0, 0);
+    batches = batches.filter((b) => b.reconciledAt && new Date(b.reconciledAt) >= from);
+  }
+  if (dateTo) {
+    const to = new Date(dateTo);
+    to.setHours(23, 59, 59, 999);
+    batches = batches.filter((b) => b.reconciledAt && new Date(b.reconciledAt) <= to);
+  }
+  
+  res.json({ batches, total: batches.length });
 });
 
 // POST /api/audit-log/confirm — confirm audit log entries
@@ -521,17 +617,37 @@ app.post("/api/audit-log/confirm", (req, res) => {
   res.json({ success: true, confirmed, total: auditLog.length });
 });
 
-// GET /api/audit-log/export — download audit log as CSV
+// GET /api/audit-log/export — download audit log as CSV (supports batchId and date range filtering)
 app.get("/api/audit-log/export", (req, res) => {
-  const headers = ["Audit ID", "Transaction ID", "UniWallet ID", "Name", "Telco", "Amount", "Date", "Previous Status", "New Status", "OVA Status", "Reconciled At", "Reconciled By", "Batch ID", "Confirmed"];
-  const rows = [headers, ...auditLog.map((e) => [
+  const { batchId, dateFrom, dateTo } = req.query;
+  let entries = [...auditLog];
+  
+  // Filter by batch
+  if (batchId) entries = entries.filter((e) => e.batchId === batchId);
+  
+  // Filter by date range
+  if (dateFrom) {
+    const from = new Date(dateFrom);
+    from.setHours(0, 0, 0, 0);
+    entries = entries.filter((e) => e.reconciledAt && new Date(e.reconciledAt) >= from);
+  }
+  if (dateTo) {
+    const to = new Date(dateTo);
+    to.setHours(23, 59, 59, 999);
+    entries = entries.filter((e) => e.reconciledAt && new Date(e.reconciledAt) <= to);
+  }
+  
+  const headers = ["Audit ID", "Transaction ID", "UniWallet ID", "Name", "Telco", "Amount", "Date", "Previous Status", "New Status", "OVA Status", "Reconciled At", "Reconciled By", "Batch ID", "Merchant ID", "Confirmed"];
+  const rows = [headers, ...entries.map((e) => [
     e.id, e.transactionId, e.uniwalletId, e.name, e.telco, e.amount, e.date,
     e.previousStatus, e.newStatus, e.ovaStatus, e.reconciledAt, e.reconciledBy,
-    e.batchId, e.confirmed ? "Yes" : "No"
+    e.batchId, e.merchantId || "", e.confirmed ? "Yes" : "No"
   ])];
   const csv = rows.map((r) => r.map((c) => `"${c}"`).join(",")).join("\n");
+  
+  const suffix = batchId ? `_batch_${batchId}` : (dateFrom || dateTo) ? `_${dateFrom || "start"}_to_${dateTo || "now"}` : "";
   res.setHeader("Content-Type", "text/csv");
-  res.setHeader("Content-Disposition", `attachment; filename=audit_log_${Date.now()}.csv`);
+  res.setHeader("Content-Disposition", `attachment; filename=audit_log${suffix}_${Date.now()}.csv`);
   res.send(csv);
 });
 

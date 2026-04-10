@@ -1,4 +1,4 @@
-# UniWallet CS Reconciliation Dashboard
+# ITC Reconciliation Dashboard
 
 A full-stack reconciliation dashboard for the CS team to view, filter, update, and export transactions — with native n8n automation support.
 

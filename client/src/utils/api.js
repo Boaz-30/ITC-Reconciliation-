@@ -51,9 +51,13 @@ export const api = {
   },
   getOvaRecords: () => apiFetch("/ova/records"),
   deleteOva: () => apiFetch("/ova", { method: "DELETE" }),
-  getReconciliation: () => apiFetch("/reconciliation"),
-  bulkResolve: (updatedBy = "Bulk Reconciliation") =>
-    apiFetch("/reconciliation/bulk-resolve", { method: "POST", body: JSON.stringify({ updatedBy }) }),
+  getMerchants: () => apiFetch("/merchants"),
+  getReconciliation: (merchantId) => {
+    const qs = merchantId && merchantId !== "all" ? `?merchantId=${encodeURIComponent(merchantId)}` : "";
+    return apiFetch(`/reconciliation${qs}`);
+  },
+  bulkResolve: (updatedBy = "Bulk Reconciliation", merchantId) =>
+    apiFetch("/reconciliation/bulk-resolve", { method: "POST", body: JSON.stringify({ updatedBy, merchantId }) }),
   triggerN8n: () => apiFetch("/trigger-n8n", { method: "POST" }),
 
   // Audit Log
@@ -61,10 +65,18 @@ export const api = {
     const qs = new URLSearchParams(params).toString();
     return apiFetch(`/audit-log?${qs}`);
   },
+  getAuditBatches: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return apiFetch(`/audit-log/batches?${qs}`);
+  },
   confirmAuditEntries: (body) =>
     apiFetch("/audit-log/confirm", { method: "POST", body: JSON.stringify(body) }),
-  exportAuditLog: () => {
-    window.open(`${BASE}/audit-log/export`, "_blank");
+  exportAuditLog: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    window.open(`${BASE}/audit-log/export?${qs}`, "_blank");
+  },
+  exportAuditBatch: (batchId) => {
+    window.open(`${BASE}/audit-log/export?batchId=${encodeURIComponent(batchId)}`, "_blank");
   },
 
   // Export CSV

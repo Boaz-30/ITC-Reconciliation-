@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from "react";
+import React, { useState, useCallback } from "react";
 import Sidebar from "./components/Sidebar.jsx";
 import TransactionsPage from "./pages/TransactionsPage.jsx";
 import UploadPage from "./pages/UploadPage.jsx";
@@ -11,11 +11,6 @@ export default function App() {
   const [view, setView] = useState("all");
   const [stats, setStats] = useState({});
   const { toasts, toast } = useToast();
-  const [theme, setTheme] = useState("light");
-
-  useEffect(() => {
-    document.documentElement.setAttribute("data-theme", theme);
-  }, [theme]);
 
   const handleViewChange = useCallback((v) => setView(v), []);
   const handleUploaded = useCallback((next) => { if (next) setView(next); }, []);
@@ -47,7 +42,6 @@ export default function App() {
           {stats.failed != null && (
             <Pill label={`${stats.failed} Failed`} bg="var(--red-50)" color="var(--red-700)" />
           )}
-          <button title="Toggle Dark Mode" style={{ background: "var(--bg-input)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", cursor: "pointer", width: 36, height: 36, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, marginLeft: 16, color: "var(--text-primary)" }} onClick={() => setTheme(t => t === "light" ? "dark" : "light")}>{theme === "light" ? "☾" : "☀"}</button>
         </div>
       </header>
 
